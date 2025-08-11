@@ -33,15 +33,50 @@ class TraceFormatter:
         if not self.web3.is_connected(): # 检查是否连接成功
             raise ConnectionError("无法连接到以太坊节点，请检查provider URL是否正确")
 
-    # 地址标准化
-    def _normalize_address(self, address: str) -> str: # 定义一个函数，接收一个地址字符串，返回一个标准化的地址字符串
+    # 地址标准化（增加补0逻辑）
+    def _normalize_address(self, address: str) -> str:
+        """
+        标准化以太坊地址格式，确保在0x后、数字前补0以满足42字符长度
+        返回: 标准42字符地址(0x+40字符)或空字符串
+        """
         if not address:
             return ""
+            
         try:
-            checksum_addr = Web3.to_checksum_address(address) # 使用Web3库将地址转换为校验和格式
-            return checksum_addr.lower() # 返回小写格式的校验和地址
-        except:
-            return ""  # 无效地址返回空
+            # 处理特殊格式：移除所有空白字符和多余前缀
+            address_str = str(address).strip().lower().replace("0x0x", "0x")
+            
+            # 提取0x前缀和主体部分
+            if address_str.startswith("0x"):
+                prefix = "0x"
+                body = address_str[2:]  # 去掉0x后的主体部分
+            else:
+                prefix = "0x"
+                body = address_str  # 无0x前缀时直接取主体
+            
+            # 处理32字节地址（64字符）转20字节（40字符）
+            if len(body) > 40:
+                body = body[-40:]  # 取最后40个字符（标准地址长度）
+            
+            # 计算需要补充的0的数量（主体部分需40字符）
+            if len(body) < 40:
+                padding = "0" * (40 - len(body))
+                body = padding + body  # 在主体前补0（即0x后面补0）
+            
+            # 组合完整地址
+            full_address = f"{prefix}{body}"
+            
+            # 验证长度是否正确（0x + 40字符 = 42字符）
+            if len(full_address) != 42:
+                raise ValueError(f"地址长度异常: {len(full_address)}字符（预期42）")
+            
+            # 验证地址有效性并返回小写格式
+            checksum_addr = Web3.to_checksum_address(full_address)
+            return checksum_addr.lower()
+            
+        except Exception as e:
+            logger.debug(f"地址标准化失败: {address} - {str(e)}")
+            return ""
 
     # PC标准化
     def _normalize_pc(self, pc: int) -> str:
@@ -68,62 +103,110 @@ class TraceFormatter:
         tx = self.web3.eth.get_transaction(tx_hash) # 使用Web3库获取指定交易哈希的交易信息
         return tx.get("to", "") # 获取交易的目标地址（合约或外部账户）
 
-    # 获取并标准化trace,计算contract address
+    # 获取并标准化trace,计算contract address（增加call是否成功判断）
     def get_standardized_trace(self, tx_hash: str) -> StandardizedTrace:
+        """
+        获取并标准化交易的执行轨迹，修复地址计算错误
+        """
         trace_config = {
             "enableMemory": False,
             "disableStack": False,
             "disableStorage": False,
             "enableReturnData": False
-        } # 配置trace选项，禁用内存、栈和存储的跟踪，启用返回数据跟踪
+        }
         
         try:
             raw_trace = self.web3.manager.request_blocking(
                 "debug_traceTransaction", 
-                [tx_hash, trace_config] # 使用Web3库的debug_traceTransaction方法获取交易的trace信息
-            ) # 使用Web3库的debug_traceTransaction方法获取交易的trace信息
-            struct_logs = raw_trace.get("structLogs", []) # 获取结构化日志信息
+                [tx_hash, trace_config]
+            )
+            struct_logs = raw_trace.get("structLogs", [])
             
             steps = []
-            # 初始地址（交易直接调用的合约）
             initial_address = self._normalize_address(self._get_initial_address(tx_hash))
-            current_address = initial_address  # 当前步骤的地址
-            next_address = initial_address     # 下一个步骤的地址（初始与当前相同）
-            # 调用栈：记录合约调用层级
-            call_stack = [initial_address] if initial_address else [] # 初始化调用栈，初始地址为交易直接调用的合约地址
+            current_address = initial_address
+            next_address = initial_address
+            call_stack = [initial_address] if initial_address else []
             
-            for step in struct_logs:
-                pc = step.get("pc", 0) # 获取当前步骤的PC
-                opcode = step.get("op", "").upper() # 获取当前步骤的opcode
-                raw_stack = step.get("stack", []) # 获取当前步骤的栈信息
+            for i, step in enumerate(struct_logs):
+                pc = step.get("pc", 0)
+                opcode = step.get("op", "").upper()
+                raw_stack = step.get("stack", [])
+                logger.debug(
+                    f"步骤{i} | opcode: {opcode} | 当前地址: {current_address} "
+                    f"| 栈长度: {len(raw_stack)}"
+                )
                 
-                # 1. 处理合约调用：下一个步骤切换到新地址
+                # 处理合约调用指令
                 if opcode in {"CALL", "CALLCODE", "DELEGATECALL", "STATICCALL"}:
-                    if len(raw_stack) >= 2:  # 确保栈中有目标地址参数
-                        to_address = self._normalize_address(raw_stack[-2])
-                        if to_address:  
-                            # 当前地址压入调用栈（记录调用者）
+                    # CALL类指令需要7个参数，栈长度必须足够
+                    if len(raw_stack) >= 7:
+                        # 正确提取目标地址（栈结构：[gas, to, value, inOffset, inSize, outOffset, outSize]）
+                        to_address_raw = raw_stack[-2]  # 目标地址在栈中倒数第二个位置
+                        to_address = self._normalize_address(to_address_raw)
+                        
+                        # 验证地址有效性
+                        is_valid_address = bool(to_address)
+                        
+                        # 检查下一个步骤的PC值
+                        has_next_step = i < len(struct_logs) - 1
+                        next_step_pc = None
+                        if has_next_step:
+                            next_step_pc = self._normalize_pc(struct_logs[i+1].get("pc", 0))
+                        is_next_pc_zero = has_next_step and next_step_pc == "0x0"
+                        
+                        # 只有同时满足：有效地址 + 下一个步骤PC为0x0，才切换地址
+                        if is_valid_address and is_next_pc_zero:
                             call_stack.append(current_address)
-                            # 下一个步骤切换到新地址
                             next_address = to_address
+                            logger.debug(f"地址切换: {current_address} -> {to_address}")
+                        else:
+                            # 记录地址未切换的原因
+                            if not is_valid_address:
+                                logger.debug(f"无效目标地址: {to_address_raw} -> {to_address}")
+                            if not is_next_pc_zero:
+                                logger.debug(f"下一个步骤PC非0x0: {next_step_pc}")
+                            next_address = current_address
+                    else:
+                        # 栈长度不足，无法正确提取参数
+                        logger.debug(f"CALL指令栈长度不足: {len(raw_stack)} < 7")
+                        next_address = current_address
                 
-                # 2. 处理合约创建：下一个步骤切换到新合约地址
+                # 处理合约创建指令
                 elif opcode in ["CREATE", "CREATE2"]:
-                    new_address = ""  # 实际需从step结果提取新地址，此处简化
+                    # 从返回数据中提取新创建的合约地址（实际场景需要解析返回值）
+                    new_address = ""
+                    # 这里需要根据实际返回数据提取新地址，示例中简化处理
+                    
                     if new_address:
-                        call_stack.append(current_address)
-                        next_address = new_address  # 下一个步骤切换到新地址
+                        new_address = self._normalize_address(new_address)
+                        has_next_step = i < len(struct_logs) - 1
+                        if has_next_step:
+                            next_step_pc = self._normalize_pc(struct_logs[i+1].get("pc", 0))
+                            if next_step_pc == "0x0" and new_address:
+                                call_stack.append(current_address)
+                                next_address = new_address
+                                logger.debug(f"创建新合约: {new_address}")
+                            else:
+                                next_address = current_address
+                        else:
+                            next_address = current_address
+                    else:
+                        next_address = current_address
                 
-                # 3. 处理终止指令：下一个步骤返回上一层地址
-                elif opcode in {"STOP", "RETURN", "REVERT", "INVALID", "SELFDESTRUCT"} and len(call_stack) > 1:
-                        next_address = call_stack[-1]  # 下一个步骤切换到上一层地址
-                        call_stack.pop()  # 移除当前层
+                # 处理终止指令（返回上一层调用）
+                elif opcode in {"STOP", "RETURN", "REVERT", "INVALID", "SELFDESTRUCT"}:
+                    if len(call_stack) > 1:
+                        next_address = call_stack.pop()
+                        logger.debug(f"返回上一层地址: {next_address}")
+                    else:
+                        next_address = current_address
                 
-                # 4. 其他指令：下一个步骤地址不变
+                # 其他指令保持当前地址
                 else:
-                    next_address = current_address  # 保持当前地址
+                    next_address = current_address
                 
-                # 记录当前步骤的信息（使用current_address，未切换）
+                # 记录当前步骤信息
                 steps.append({
                     "address": current_address,
                     "pc": self._normalize_pc(pc),
@@ -131,7 +214,7 @@ class TraceFormatter:
                     "stack": self._normalize_stack(raw_stack)
                 })
                 
-                # 5. 更新当前地址为next_address（为下一个步骤做准备）
+                # 更新当前地址为下一个地址
                 current_address = next_address
             
             return {
@@ -139,9 +222,10 @@ class TraceFormatter:
                 "steps": steps
             }
             
-        except Exception as e: 
-            logger.error(f"处理trace失败: {e}") # 记录错误信息
+        except Exception as e:
+            logger.error(f"处理trace失败: {e}")
             raise
+
 
     # 提取合约地址
     def extract_contracts_from_trace(self, standardized_trace: StandardizedTrace) -> Set[str]:
@@ -167,4 +251,5 @@ class TraceFormatter:
     def get_all_contracts_bytecode(self, tx_hash: str) -> List[ContractBytecode]:
         trace = self.get_standardized_trace(tx_hash)
         contracts = self.extract_contracts_from_trace(trace)
+
         return [self.get_contract_bytecode(addr) for addr in contracts if addr]
