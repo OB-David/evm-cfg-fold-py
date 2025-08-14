@@ -125,9 +125,9 @@ def render_transaction(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
     """
     # 定义一组协调的颜色用于不同合约（可以根据需要扩展）
     contract_colors = [
-        "#a8d1ff", "#ffb3ba", "#baffc9", "#ffffba", "#ffdfba", 
-        "#ffb3ff", "#c9c9ff", "#bafaff", "#baffc9", "#ffb3ba",
-        "#d1c4e9", "#b2ebf2", "#c8e6c9", "#fff9c4", "#ffccbc"
+    "#FF9E9E",  "#81C784",  "#64B5F6",  "#FFF176",  "#BA68C8",  
+    "#4DD0E1",  "#FFB74D",  "#F48FB1",  "#AED581",  "#7986CB", 
+    "#FF8A65",  "#4DB6AC", "#DCE775",   "#9575CD",  "#FFD54F" 
     ]
     
     # 获取所有唯一的合约地址并分配颜色
@@ -172,4 +172,5 @@ def render_transaction(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
             f.write(f'    "{source_id}" -> "{target_id}" [label="{edge_label}"];\n')
         
         f.write('}')
+
     print(f"CFG已渲染为DOT文件：{output_path}")
