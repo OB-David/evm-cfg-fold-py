@@ -1,10 +1,13 @@
 import json
 import os
-from evm_information import TraceFormatter
-from basic_block import BasicBlockProcessor
-from cfg_transaction import CFGConstructor, render_transaction
-from cfg_contract import ContractCFGConnector, render_contract
-from cfg_static_complete import StaticCompleteCFGBuilder, render_static_complete
+from dotenv import load_dotenv
+from utils.evm_information import TraceFormatter
+from utils.basic_block import BasicBlockProcessor
+from utils.cfg_transaction import CFGConstructor, render_transaction
+from utils.cfg_contract import ContractCFGConnector, render_contract
+from utils.cfg_static_complete import StaticCompleteCFGBuilder, render_static_complete
+
+load_dotenv()
 
 def create_result_directory(tx_hash: str) -> str:
     """创建结果目录结构: Result/交易哈希/"""
@@ -18,7 +21,7 @@ def create_result_directory(tx_hash: str) -> str:
 
 def main():
     # 配置参数
-    PROVIDER_URL = "http://10.222.117.105:8545"
+    PROVIDER_URL = os.environ.get("GETH_API")
     TX_HASH = "0x476d0ae3e8229b7e85c6bf6103a4e4ab0d38e06fcce5dcc82aaeb2fb96bf21f2"
 
     try:
