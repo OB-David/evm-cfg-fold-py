@@ -4,8 +4,8 @@
 # 与 cfg_contract.py (动态路径) 和 cfg_transaction.py (跨合约流) 保持独立
 
 from typing import List, Dict, Tuple, Optional
-from basic_block import Block
-from cfg_structure import CFG, BlockNode, Edge
+from utils.basic_block import Block
+from utils.cfg_structure import CFG, BlockNode, Edge
 from web3 import Web3
 import logging
 import pyevmasm as evmasm  # 需要使用 pyevmasm 进行反汇编以获取操作数

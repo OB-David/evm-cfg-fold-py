@@ -1,6 +1,6 @@
 from typing import List, Dict
 from pyevmasm import disassemble_all # 用于反汇编EVM字节码
-from evm_information import ContractBytecode
+from utils.evm_information import ContractBytecode
 
 
 class Block:

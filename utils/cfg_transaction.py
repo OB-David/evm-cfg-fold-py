@@ -3,9 +3,9 @@
 # 包含Transaction Execution CFG渲染
 
 from typing import List, Dict, Tuple, Optional, Set
-from evm_information import StandardizedTrace, StandardizedStep
-from basic_block import Block, BasicBlockProcessor
-from cfg_structure import CFG, BlockNode, Edge
+from utils.evm_information import StandardizedTrace, StandardizedStep
+from utils.basic_block import Block, BasicBlockProcessor
+from utils.cfg_structure import CFG, BlockNode, Edge
 
 
 class CFGConstructor:

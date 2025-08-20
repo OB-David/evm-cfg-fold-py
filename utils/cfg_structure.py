@@ -1,7 +1,7 @@
 # cfg_structures.py负责定义CFG图的核心数据结构
 
 from typing import List
-from basic_block import Block
+from utils.basic_block import Block
 
 
 class BlockNode:
