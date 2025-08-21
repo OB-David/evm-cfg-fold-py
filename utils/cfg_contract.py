@@ -177,11 +177,13 @@ class ContractCFGConnector:
         if opcode in {"JUMP"}:
             return "JUMP"
         elif opcode in {"JUMPI"}:
-            return "JUMPI"  # 与交易级保持一致，区分JUMP和JUMPI
-        elif opcode in {"CALL", "STATICCALL"}:
+            return "JUMPI"
+        elif opcode in {"CALL"}:
             return "CALL"
-        elif opcode in {"CALLCODE", "DELEGATECALL"}:
-            return "OTHERCALL"  # 细分调用类型
+        elif opcode in {"STATICCALL"}:
+            return "STATICCALL"
+        elif opcode in {"CALLCODE,DELEFATECALL"}:
+            return "OTHERCALL"
         elif opcode in {"RETURN"}:
             return "RETURN"
         elif opcode in {"REVERT"}:
@@ -195,8 +197,7 @@ class ContractCFGConnector:
         else:
             return "UNKNOWN"
 
-
-
+# 渲染CFG为DOT文件（显示所有指令并按合约染色）
 def render_contract(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
     """
     将合约CFG渲染为DOT文件（默认从上到下排布）
@@ -210,14 +211,15 @@ def render_contract(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
         "JUMP": "#ff9800",          
         "JUMPI": "#eaff00",         
         "CALL": "#037dff",          
+        "STATICCALL": "#2196F3",    
         "OTHERCALL": "#7b61ff",     
         "RETURN": "#04f4fd",        
         "REVERT": "#ff6b6b",        
         "DESTRUCT": "#012F0B",      
         "TERMINATE": "#d104ff",     
         "CREATE": "#8bc34a",        
-        "NOTJUMP": "#583b1c",      
-        "UNKNOWN": "#bdbdbd"
+        "NOTJUMP": "#533203",       
+        "UNKNOWN": "#bdbdbd"        
     }
 
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -256,4 +258,5 @@ def render_contract(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
         f.write('}')
     
     print(f"合约CFG已渲染至: {output_path}（布局方向: {rankdir}）")
+
 
