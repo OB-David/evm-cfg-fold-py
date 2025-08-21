@@ -207,12 +207,16 @@ def render_contract(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
         rankdir: 布局方向 (TB: 从上到下, LR: 从左到右)，默认TB
     """
     edge_color_map = {
-        "JUMP": "#ff9800",
-        "CALL": "#4caf50",
-        "RETURN": "#2196f3",
-        "DESTRUCT": "#f44336",
-        "TERMINATE": "#9e9e9e",
-        "CREATE": "#8bc34a",
+        "JUMP": "#ff9800",          
+        "JUMPI": "#eaff00",         
+        "CALL": "#037dff",          
+        "OTHERCALL": "#7b61ff",     
+        "RETURN": "#04f4fd",        
+        "REVERT": "#ff6b6b",        
+        "DESTRUCT": "#012F0B",      
+        "TERMINATE": "#d104ff",     
+        "CREATE": "#8bc34a",        
+        "NOTJUMP": "#583b1c",      
         "UNKNOWN": "#bdbdbd"
     }
 
@@ -252,3 +256,4 @@ def render_contract(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
         f.write('}')
     
     print(f"合约CFG已渲染至: {output_path}（布局方向: {rankdir}）")
+
