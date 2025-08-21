@@ -193,28 +193,31 @@ class CFGConstructor:
 def render_transaction(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
     """
     将CFG渲染为DOT文件，显示所有指令，并为不同合约的块自动分配不同颜色
+    包含MUL或DIV指令的块会有加粗边框，同时为不同类型的边添加颜色
     """
-    # 定义一组协调的颜色用于不同合约（可以根据需要扩展）
+    # 合约颜色映射
     contract_colors = [
-    "#FF9E9E",  # 浅红色
-    "#81C784",  # 浅绿色
-    "#64B5F6",  # 浅蓝色
-    "#FFF176",  # 浅黄色
-    "#BA68C8",  # 浅紫色
-    "#4DD0E1",  # 浅青色
-    "#FFB74D",  # 浅橙色
-    "#F48FB1",  # 浅粉红
-    "#AED581",  # 浅黄绿
-    "#7986CB",  # 浅深蓝
-    "#FF8A65",  # 浅橙红
-    "#4DB6AC",  # 浅蓝绿
-    "#DCE775",  # 浅荧光绿
-    "#9575CD",  # 浅紫罗兰
-    "#FFD54F"   # 浅琥珀色
+        "#FF9E9E", "#81C784", "#64B5F6", "#FFF176", "#BA68C8",
+        "#4DD0E1", "#FFB74D", "#F48FB1", "#AED581", "#7986CB",
+        "#FF8A65", "#4DB6AC", "#DCE775", "#9575CD", "#FFD54F"
     ]
     
+    # 边类型颜色映射
+    edge_color_map = {
+        "JUMP": "#ff9800",          
+        "JUMPI": "#eaff00",         
+        "CALL": "#037dff",          
+        "STATICCALL": "#2196F3",    
+        "OTHERCALL": "#7b61ff",     
+        "RETURN": "#04f4fd",        
+        "REVERT": "#ff6b6b",        
+        "DESTRUCT": "#012F0B",      
+        "TERMINATE": "#d104ff",     
+        "CREATE": "#8bc34a",        
+        "NOTJUMP": "#533203",       
+        "UNKNOWN": "#bdbdbd"        
+    }
     
-    # 获取所有唯一的合约地址并分配颜色
     unique_addresses: Set[str] = {node.address for node in cfg.nodes}
     address_color_map: Dict[str, str] = {}
     
@@ -225,35 +228,34 @@ def render_transaction(cfg: CFG, output_path: str, rankdir: str = "TB") -> None:
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write('digraph CFG {\n')
         f.write(f'    rankdir={rankdir};\n')
-        # 调整节点样式以适应可能较长的指令列表
         f.write('    node [shape=box, style="filled, rounded", '
                 'fontname="Arial", fontsize=8, margin=0.1];\n')
-        f.write('    edge [fontname="Arial", fontsize=8, color="#555555"];\n\n')
+        f.write('    edge [fontname="Arial", fontsize=8, penwidth=1.2];\n\n')
         
-        # 写入所有节点（包含所有指令和合约特定颜色）
         for node in cfg.nodes:
             node_id = f"node_{node.address.replace('0x', '')}_{node.start_pc.replace('0x', '')}"
-            # 获取该节点的颜色
-            node_color = address_color_map.get(node.address, "#e0e0e0")  # 默认灰色
+            node_color = address_color_map.get(node.address, "#e0e0e0")
             
-            # 节点标签包含地址、PC和所有指令
+            has_mul_or_div = any(inst[1] in {"MUL", "DIV"} for inst in node.instructions)
+            base_style = "filled, rounded"
+            node_style = f"{base_style}, bold" if has_mul_or_div else base_style  # 调整了边框粗细
+            
             node_label = (f"{node.address[:8]}...\n"
                          f"start: {node.start_pc} | end: {node.end_pc}\n"
                          f"terminator: {node.terminator}\n"
                          f"---------\n"
                          f"{node.get_instructions_str()}")
-            # 替换引号避免DOT语法错误
             node_label = node_label.replace('"', '\\"')
-            f.write(f'    "{node_id}" [label="{node_label}", fillcolor="{node_color}"];\n')
+            f.write(f'    "{node_id}" [label="{node_label}", fillcolor="{node_color}", style="{node_style}"];\n')
         
         f.write('\n')
         
-        # 写入所有边
         for edge in cfg.edges:
             source_id = f"node_{edge.source.address.replace('0x', '')}_{edge.source.start_pc.replace('0x', '')}"
             target_id = f"node_{edge.target.address.replace('0x', '')}_{edge.target.start_pc.replace('0x', '')}"
+            edge_color = edge_color_map.get(edge.edge_type, "#bdbdbd")
             edge_label = f"id: {edge.edge_id} ({edge.edge_type})"
-            f.write(f'    "{source_id}" -> "{target_id}" [label="{edge_label}"];\n')
+            f.write(f'    "{source_id}" -> "{target_id}" [label="{edge_label}", color="{edge_color}"];\n')
         
         f.write('}')
     print(f"CFG已渲染为DOT文件：{output_path}")
