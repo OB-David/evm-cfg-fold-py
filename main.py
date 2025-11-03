@@ -49,7 +49,7 @@ def main():
 
         # 3. 获取所有合约的字节码
         print("正在获取合约字节码...")
-        contracts_bytecode = formatter.get_all_contracts_bytecode(TX_HASH, all_contracts = contracts )
+        contracts_bytecode = formatter.get_all_contracts_bytecode(all_contracts = contracts )
 
         # 4. 转换字节码为基本块
         print("正在将字节码转换为基本块...")
@@ -147,5 +147,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
