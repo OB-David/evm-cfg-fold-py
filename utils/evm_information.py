@@ -30,6 +30,7 @@ class ContractBytecode(TypedDict):
 
 class TraceFormatter:
     def __init__(self, provider_url: str): # 初始化函数，接收一个以太坊节点的URL
+        self.provider_url = provider_url
         self.web3 = Web3(Web3.HTTPProvider(provider_url)) # 创建Web3实例
         if not self.web3.is_connected(): # 检查是否连接成功
             raise ConnectionError("无法连接到以太坊节点，请检查provider URL是否正确")
@@ -120,91 +121,81 @@ class TraceFormatter:
             raw_trace = json.loads(result.stdout)
             logger.info(f"成功获取 trace: {tx_hash}")
 
-        except subprocess.CalledProcessError as e:
-            logger.error(f"cast rpc 执行失败: {e.stderr}")
-            raise RuntimeError(f"无法获取 trace：{tx_hash}") from e
-        except json.JSONDecodeError as e:
-            logger.error(f"解析 cast rpc 输出失败: {e}")
-            raise RuntimeError(f"cast rpc 输出不是合法的 JSON: {tx_hash}") from e
-
-        # 从 Geth 的结果中提取 structLogs
-        struct_logs = raw_trace.get("structLogs", [])
-        steps: List["StandardizedStep"] = []
-
-        # 初始化地址栈
-        initial_address = self._normalize_address(self._get_initial_address(tx_hash))
-        current_address = initial_address
-        next_address = initial_address
-        call_stack = [initial_address] if initial_address else []
-
-        for i, step in enumerate(struct_logs):
-            pc = step.get("pc", 0)
-            opcode = step.get("op", "").upper()
-            raw_stack = step.get("stack", [])
-
-            logger.debug(f"步骤{i} | opcode: {opcode} | 当前地址: {current_address} | 栈长度: {len(raw_stack)}")
-
-            # CALL 类指令
-            if opcode in {"CALL", "CALLCODE", "DELEGATECALL", "STATICCALL"}:
-                if len(raw_stack) >= 7:
-                    to_address_raw = raw_stack[-2]
-                    to_address = self._normalize_address(to_address_raw)
-                    is_valid_address = bool(to_address)
-
-                    has_next_step = i < len(struct_logs) - 1
-                    next_step_pc = None
-                    if has_next_step:
-                        next_step_pc = self._normalize_pc(struct_logs[i + 1].get("pc", 0))
-                    is_next_pc_zero = has_next_step and next_step_pc == "0x0"
-
-                    if is_valid_address and is_next_pc_zero:
-                        call_stack.append(current_address)
-                        next_address = to_address
-                    else:
-                        next_address = current_address
-                else:
-                    next_address = current_address
-
-            # CREATE 类指令
-            elif opcode in ["CREATE", "CREATE2"]:
-                new_address = ""
-                if new_address:
-                    new_address = self._normalize_address(new_address)
-                    has_next_step = i < len(struct_logs) - 1
-                    if has_next_step:
-                        next_step_pc = self._normalize_pc(struct_logs[i + 1].get("pc", 0))
-                        if next_step_pc == "0x0" and new_address:
+            # 从 Geth 的结果中提取 structLogs
+            struct_logs = raw_trace.get("structLogs", [])
+            steps: List["StandardizedStep"] = []
+    
+            # 初始化地址栈
+            initial_address = self._normalize_address(self._get_initial_address(tx_hash))
+            current_address = initial_address
+            next_address = initial_address
+            call_stack = [initial_address] if initial_address else []
+    
+            for i, step in enumerate(struct_logs):
+                pc = step.get("pc", 0)
+                opcode = step.get("op", "").upper()
+                raw_stack = step.get("stack", [])
+    
+                logger.debug(f"步骤{i} | opcode: {opcode} | 当前地址: {current_address} | 栈长度: {len(raw_stack)}")
+    
+                # CALL 类指令
+                if opcode in {"CALL", "CALLCODE", "DELEGATECALL", "STATICCALL"}:
+                    if len(raw_stack) >= 7:
+                        to_address_raw = raw_stack[-2]
+                        to_address = self._normalize_address(to_address_raw)
+                        is_valid_address = bool(to_address)
+    
+                        has_next_step = i < len(struct_logs) - 1
+                        next_step_pc = None
+                        if has_next_step:
+                            next_step_pc = self._normalize_pc(struct_logs[i + 1].get("pc", 0))
+                        is_next_pc_zero = has_next_step and next_step_pc == "0x0"
+    
+                        if is_valid_address and is_next_pc_zero:
                             call_stack.append(current_address)
-                            next_address = new_address
+                            next_address = to_address
                         else:
                             next_address = current_address
                     else:
                         next_address = current_address
-                else:
-                    next_address = current_address
+    
+                # CREATE 类指令
+                elif opcode in ["CREATE", "CREATE2"]:
+                    new_address = ""
+                    if new_address:
+                        new_address = self._normalize_address(new_address)
+                        has_next_step = i < len(struct_logs) - 1
+                        if has_next_step:
+                            next_step_pc = self._normalize_pc(struct_logs[i + 1].get("pc", 0))
+                            if next_step_pc == "0x0" and new_address:
+                                call_stack.append(current_address)
+                                next_address = new_address
+                            else:
+                                next_address = current_address
+                        else:
+                            next_address = current_address
+                    else:
+                        next_address = current_address
+    
+                # 终止指令
+                elif opcode in {"STOP", "RETURN", "REVERT", "INVALID", "SELFDESTRUCT"}:
+                    if len(call_stack) > 1:
+                        next_address = call_stack.pop()
+                    else:
+                        next_address = current_address
+    
+                # 记录当前步骤
+                steps.append({
+                    "address": current_address,
+                    "pc": self._normalize_pc(pc),
+                    "opcode": opcode,
+                    "stack": self._normalize_stack(raw_stack)
+                })
+    
+                current_address = next_address
 
-            # 终止指令
-            elif opcode in {"STOP", "RETURN", "REVERT", "INVALID", "SELFDESTRUCT"}:
-                if len(call_stack) > 1:
-                    next_address = call_stack.pop()
-                else:
-                    next_address = current_address
-
-            # 记录当前步骤
-            steps.append({
-                "address": current_address,
-                "pc": self._normalize_pc(pc),
-                "opcode": opcode,
-                "stack": self._normalize_stack(raw_stack)
-            })
-
-            current_address = next_address
-        }
-
-        return {
-                "tx_hash": tx_hash,
-                "steps": steps
-            }
+            return {"tx_hash": tx_hash,"steps": steps}
+            
         except Exception as e:
             logger.error(f"处理trace失败: {e}")
             raise
@@ -233,5 +224,6 @@ class TraceFormatter:
     # 获取所有涉及的合约字节码
     def get_all_contracts_bytecode(self, all_contracts) -> List[ContractBytecode]:
         return [self.get_contract_bytecode(addr) for addr in all_contracts if addr]
+
 
 
