@@ -231,7 +231,6 @@ class TraceFormatter:
             raise
 
     # 获取所有涉及的合约字节码
-    def get_all_contracts_bytecode(self, tx_hash: str，trace) -> List[ContractBytecode]:
-        contracts = self.extract_contracts_from_trace(trace)
-        return [self.get_contract_bytecode(addr) for addr in contracts if addr]
+    def get_all_contracts_bytecode(self, tx_hash: str，all_contracts) -> List[ContractBytecode]:
+        return [self.get_contract_bytecode(addr) for addr in all_contracts if addr]
 
