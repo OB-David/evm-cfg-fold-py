@@ -36,12 +36,6 @@ def main():
         # 1. 获取交易的标准化trace
         print(f"正在获取交易 {TX_HASH} 的执行轨迹...")
         standardized_trace = formatter.get_standardized_trace(TX_HASH)
-        
-        # 保存 trace 到 result 目录
-        standardized_trace_path = os.path.join(result_dir, "standardized_trace.json")
-        with open(standardized_trace_path, "w", encoding="utf-8") as f:
-            json.dump(standardized_trace, f, ensure_ascii=False, indent=2)
-        print(f"Trace 已保存至: {standardized_trace_path}")
 
         # 2. 提取涉及的合约地址
         contracts = formatter.extract_contracts_from_trace(standardized_trace)
@@ -147,6 +141,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
