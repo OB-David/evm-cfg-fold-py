@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from utils.evm_information import TraceFormatter
 from utils.basic_block import BasicBlockProcessor
 from utils.cfg_transaction import CFGConstructor, render_transaction
-from utils.cfg_contract import ContractCFGConnector, render_contract
-from utils.cfg_static_complete import StaticCompleteCFGBuilder, render_static_complete
+from utils.fold_node import create_merged_cfg
+from utils.node_head_only import strip_instructions_from_dot
 
 load_dotenv()
 
@@ -22,7 +22,7 @@ def create_result_directory(tx_hash: str) -> str:
 def main():
     # 配置参数
     PROVIDER_URL = os.environ.get("GETH_API")
-    TX_HASH = "0x476d0ae3e8229b7e85c6bf6103a4e4ab0d38e06fcce5dcc82aaeb2fb96bf21f2"
+    TX_HASH = "0x091078ab83662beb848b8d5281185b3b3efffb9d58eca9a8203d734fccbf3c5d"
 
     try:
         # 创建结果目录
@@ -36,6 +36,7 @@ def main():
         # 1. 获取交易的标准化trace
         print(f"正在获取交易 {TX_HASH} 的执行轨迹...")
         standardized_trace = formatter.get_standardized_trace(TX_HASH)
+        
 
         # 2. 提取涉及的合约地址
         contracts = formatter.extract_contracts_from_trace(standardized_trace)
@@ -56,44 +57,7 @@ def main():
         tx_cfg = cfg_constructor.construct_cfg(standardized_trace)
         print(f"成功构建交易级CFG，包含 {len(tx_cfg.nodes)} 个节点和 {len(tx_cfg.edges)} 条边\n")
 
-        # 6. 为每个合约构建独立的CFG
-        print("正在构建合约级控制流图...")
-        contract_cfgs = {}
         
-        for contract_addr in contracts:
-            contract_blocks = [b for b in all_blocks if b.address == contract_addr]
-            if not contract_blocks:
-                print(f"合约 {contract_addr[:8]}... 没有基本块，跳过...")
-                continue
-                
-            contract_steps = [
-                step for step in standardized_trace["steps"] 
-                if step["address"] == contract_addr
-            ]
-            
-            connector = ContractCFGConnector(contract_blocks)
-            contract_cfg = connector.connect_contract_cfg(contract_steps)
-            contract_cfgs[contract_addr] = contract_cfg
-            
-            print(f"合约 {contract_addr[:8]}... 的CFG构建完成，包含 {len(contract_cfg.nodes)} 个节点和 {len(contract_cfg.edges)} 条边")
-
-        # 7. 为每个合约构建静态完整的CFG
-        print("正在构建静态完整的合约级控制流图...")
-        contract_cfgs_static = {}
-        # 我们需要同时遍历 contracts_bytecode 列表，以获取原始字节码
-        for contract_data in contracts_bytecode:
-            contract_addr = contract_data["address"]
-            contract_bytecode = contract_data["bytecode"] # 获取原始字节码
-            contract_blocks = [b for b in all_blocks if b.address == contract_addr]
-            if not contract_blocks:
-                print(f"合约 {contract_addr[:8]}... 没有基本块，跳过...")
-                continue
-            # 现在需要传入 contract_bytecode 和 contract_blocks
-            builder = StaticCompleteCFGBuilder(contract_bytecode, contract_blocks) # 修改：传递 contract_bytecode 和 contract_blocks
-            static_cfg = builder.build_static_cfg()
-            contract_cfgs_static[contract_addr] = static_cfg
-            print(f"合约 {contract_addr[:8]}... 的静态CFG构建完成，包含 {len(static_cfg.nodes)} 个节点和 {len(static_cfg.edges)} 条边")
-
         # 8. 保存轨迹数据
         trace_path = os.path.join(result_dir, f"trace.json")
         with open(trace_path, "w") as f:
@@ -119,20 +83,41 @@ def main():
         tx_dot_path = os.path.join(result_dir, f"transaction_cfg.dot")
         render_transaction(tx_cfg, tx_dot_path)
         print(f"交易级CFG DOT文件已保存到: {tx_dot_path}")
-        
-        # 11. 保存每个合约的CFG DOT文件
-        for addr, cfg in contract_cfgs.items():
-            short_addr = addr.lstrip('0x')[:8]
-            contract_dot_path = os.path.join(result_dir, f"contract_{short_addr}_cfg.dot")
-            render_contract(cfg, contract_dot_path)
-            print(f"合约 {short_addr} CFG DOT文件已保存到: {contract_dot_path}")
-        # 12. 保存新的静态CFG DOT文件
-        for addr, cfg in contract_cfgs_static.items():
-            short_addr = addr.lstrip('0x')[:8]
-            static_dot_path = os.path.join(result_dir, f"contract_{short_addr}_static_cfg.dot")
-            render_static_complete(cfg, static_dot_path)
-            print(f"合约 {short_addr} 静态CFG DOT文件已保存到: {static_dot_path}")
 
+        # 11. 对tx_cfg 进行折叠
+        try:
+            # create_merged_cfg 会在原 cfg 上原地合并并返回同一对象
+            merged_tx_cfg = create_merged_cfg(tx_cfg)
+            merged_tx_dot_path = os.path.join(result_dir, f"transaction_cfg_merged.dot")
+            render_transaction(merged_tx_cfg, merged_tx_dot_path)
+            print(f"合并后的交易级CFG DOT文件已保存到: {merged_tx_dot_path}")
+        except Exception as e:
+            # 保护性捕获，避免后处理异常阻断主流程
+            print(f"交易级CFG 后处理失败（不影响原始输出）：{e}")
+
+        # 12. 只保留折叠后cfg的节点头
+        try:
+            merged_head_dot_path = os.path.join(result_dir, f"transaction_cfg_merged_head.dot")
+            
+            # 从合并后的 DOT 文件生成精简 DOT 文件（删除 instructions）
+            strip_instructions_from_dot(merged_tx_dot_path, merged_head_dot_path)
+            
+            print(f"精简折叠后CFG DOT文件已保存到: {merged_head_dot_path}")
+        except Exception as e:
+            print(f"生成折叠后精简DOT失败: {e}")
+
+        # 13. 只保留原始cfg的节点头
+        try:
+            head_only_dot_path = os.path.join(result_dir, f"transaction_cfg_head_only.dot")
+            
+            # 从原始 DOT 文件生成精简 DOT 文件（删除 instructions）
+            strip_instructions_from_dot(tx_dot_path, head_only_dot_path)
+            
+            print(f"精简原始CFG DOT文件已保存到: {head_only_dot_path}")
+        except Exception as e:
+            print(f"生成原始精简DOT失败: {e}")
+
+    
         print("\n===== 处理完成 =====")
         print(f"所有结果已保存到: {os.path.abspath(result_dir)}")
         
@@ -141,7 +126,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
